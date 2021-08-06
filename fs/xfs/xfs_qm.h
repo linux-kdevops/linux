@@ -141,7 +141,6 @@ struct xfs_dquot_acct {
 extern void		xfs_qm_destroy_quotainfo(struct xfs_mount *);
 
 /* dquot stuff */
-extern void		xfs_qm_dqpurge_all(struct xfs_mount *, uint);
 extern void		xfs_qm_dqrele_all_inodes(struct xfs_mount *, uint);
 
 /* quota ops */
