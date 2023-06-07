@@ -91,6 +91,10 @@ module_param(apst_secondary_latency_tol_us, ulong, 0644);
 MODULE_PARM_DESC(apst_secondary_latency_tol_us,
 	"secondary APST latency tolerance in us");
 
+static unsigned int debug_large_atomics;
+module_param(debug_large_atomics, uint, 0644);
+MODULE_PARM_DESC(debug_large_atomics, "allow large atomics <= awun or nawun <= mdts");
+
 /*
  * Older kernels didn't enable protection information if it was at an offset.
  * Newer kernels do, so it breaks reads on the upgrade if such formats were
@@ -2066,6 +2070,17 @@ static bool nvme_update_disk_info(struct nvme_ns *ns, struct nvme_id_ns *id,
 		 * be aware of out of order reads/writes as npwg and nows
 		 * are purely performance optimizations.
 		 */
+
+		/*
+		 * If you're not concerned about power failure, in theory,
+		 * you should be able to experiment up to awun rather safely.
+		 */
+		if (debug_large_atomics) {
+			phys_bs = atomic_bs = debug_large_atomics;
+			dev_info(ns->ctrl->device,
+				 "Forcing large atomic: %u (awun_bs: %u awun: %u)\n",
+				 debug_large_atomics, awun_bs, awun);
+		}
 	}
 
 	/*
