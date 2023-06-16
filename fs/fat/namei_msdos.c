@@ -689,7 +689,7 @@ static struct file_system_type msdos_fs_type = {
 	.owner		= THIS_MODULE,
 	.name		= "msdos",
 	.kill_sb	= kill_block_super,
-	.fs_flags	= FS_REQUIRES_DEV | FS_ALLOW_IDMAP,
+	.fs_flags	= FS_REQUIRES_DEV | FS_ALLOW_IDMAP | FS_BUFFER_HEADS,
 	.init_fs_context = msdos_init_fs_context,
 	.parameters	= fat_param_spec,
 };
