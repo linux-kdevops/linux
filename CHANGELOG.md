@@ -1,3 +1,6 @@
+large-block-linus-next (2023-11-03):
+- rebased coexistance work and nvme work to help test real LBS drives
+
 large-block-minorder-6.6.0-rc5-v2 (2023-10-30):
 - align the index in do_read_cache_folio()
 
