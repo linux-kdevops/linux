@@ -3035,6 +3035,9 @@ bool can_split_folio(struct folio *folio, int *pextra_pins)
  * Returns 0 if the hugepage is split successfully.
  * Returns -EBUSY if the page is pinned or if anon_vma disappeared from under
  * us.
+ *
+ * Callers should ensure that the order respects the address space mapping
+ * min-order if one is set.
  */
 int split_huge_page_to_list_to_order(struct page *page, struct list_head *list,
 				     unsigned int new_order)
@@ -3107,6 +3110,7 @@ int split_huge_page_to_list_to_order(struct page *page, struct list_head *list,
 		mapping = NULL;
 		anon_vma_lock_write(anon_vma);
 	} else {
+		unsigned int min_order;
 		gfp_t gfp;
 
 		mapping = folio->mapping;
@@ -3114,6 +3118,14 @@ int split_huge_page_to_list_to_order(struct page *page, struct list_head *list,
 		/* Truncated ? */
 		if (!mapping) {
 			ret = -EBUSY;
+			goto out;
+		}
+
+		min_order = mapping_min_folio_order(folio->mapping);
+		if (new_order < min_order) {
+			VM_WARN_ONCE(1, "Cannot split mapped folio below min-order: %u",
+				     min_order);
+			ret = -EINVAL;
 			goto out;
 		}
 
@@ -3225,6 +3237,21 @@ out:
 	xas_destroy(&xas);
 	count_vm_event(!ret ? THP_SPLIT_PAGE : THP_SPLIT_PAGE_FAILED);
 	return ret;
+}
+
+int split_folio_to_list(struct folio *folio, struct list_head *list)
+{
+	unsigned int min_order = 0;
+
+	if (!folio_test_anon(folio)) {
+		if (!folio->mapping) {
+			count_vm_event(THP_SPLIT_PAGE_FAILED);
+			return -EBUSY;
+		}
+		min_order = mapping_min_folio_order(folio->mapping);
+	}
+
+	return split_huge_page_to_list_to_order(&folio->page, list, min_order);
 }
 
 void folio_undo_large_rmappable(struct folio *folio)
@@ -3466,6 +3493,7 @@ static int split_huge_pages_pid(int pid, unsigned long vaddr_start,
 		struct vm_area_struct *vma = vma_lookup(mm, addr);
 		struct page *page;
 		struct folio *folio;
+		unsigned int target_order = new_order;
 
 		if (!vma)
 			break;
@@ -3502,7 +3530,18 @@ static int split_huge_pages_pid(int pid, unsigned long vaddr_start,
 		if (!folio_trylock(folio))
 			goto next;
 
-		if (!split_folio_to_order(folio, new_order))
+		if (!folio_test_anon(folio)) {
+			unsigned int min_order;
+
+			if (!folio->mapping)
+				goto next;
+
+			min_order = mapping_min_folio_order(folio->mapping);
+			if (new_order < target_order)
+				target_order = min_order;
+		}
+
+		if (!split_folio_to_order(folio, target_order))
 			split++;
 
 		folio_unlock(folio);
@@ -3545,13 +3584,18 @@ static int split_huge_pages_in_file(const char *file_path, pgoff_t off_start,
 
 	for (index = off_start; index < off_end; index += nr_pages) {
 		struct folio *folio = filemap_get_folio(mapping, index);
+		unsigned int min_order, target_order = new_order;
 
 		nr_pages = 1;
 		if (IS_ERR(folio))
 			continue;
 
-		if (!folio_test_large(folio))
+		if (!folio->mapping || !folio_test_large(folio))
 			goto next;
+
+		min_order = mapping_min_folio_order(mapping);
+		if (new_order < min_order)
+			target_order = min_order;
 
 		total++;
 		nr_pages = folio_nr_pages(folio);
@@ -3562,7 +3606,7 @@ static int split_huge_pages_in_file(const char *file_path, pgoff_t off_start,
 		if (!folio_trylock(folio))
 			goto next;
 
-		if (!split_folio_to_order(folio, new_order))
+		if (!split_folio_to_order(folio, target_order))
 			split++;
 
 		folio_unlock(folio);
