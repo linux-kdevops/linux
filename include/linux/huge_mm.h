@@ -64,6 +64,8 @@ ssize_t single_hugepage_flag_show(struct kobject *kobj,
 				  enum transparent_hugepage_flag flag);
 extern struct kobj_attribute shmem_enabled_attr;
 
+#define split_folio(f) split_folio_to_list(f, NULL)
+
 /*
  * Mask of all large folio orders supported for anonymous THP; all orders up to
  * and including PMD_ORDER, except order-0 (which is not "huge") and order-1
@@ -301,9 +303,10 @@ unsigned long thp_get_unmapped_area_vmflags(struct file *filp, unsigned long add
 bool can_split_folio(struct folio *folio, int *pextra_pins);
 int split_huge_page_to_list_to_order(struct page *page, struct list_head *list,
 		unsigned int new_order);
+int split_folio_to_list(struct folio *folio, struct list_head *list);
 static inline int split_huge_page(struct page *page)
 {
-	return split_huge_page_to_list_to_order(page, NULL, 0);
+	return split_folio(page_folio(page));
 }
 void deferred_split_folio(struct folio *folio);
 
@@ -479,6 +482,10 @@ static inline int split_huge_page(struct page *page)
 {
 	return 0;
 }
+static inline int split_folio_to_list(struct page *page, struct list_head *list)
+{
+	return 0;
+}
 static inline void deferred_split_folio(struct folio *folio) {}
 #define split_huge_pmd(__vma, __pmd, __address)	\
 	do { } while (0)
@@ -585,8 +592,5 @@ static inline int split_folio_to_order(struct folio *folio, int new_order)
 {
 	return split_folio_to_list_to_order(folio, NULL, new_order);
 }
-
-#define split_folio_to_list(f, l) split_folio_to_list_to_order(f, l, 0)
-#define split_folio(f) split_folio_to_order(f, 0)
 
 #endif /* _LINUX_HUGE_MM_H */
