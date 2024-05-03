@@ -36,6 +36,14 @@ int __block_write_begin_int(struct folio *folio, loff_t pos, unsigned len,
 		get_block_t *get_block, const struct iomap *iomap);
 
 /*
+ * iomap/buffered-io.c
+ */
+
+#define ZERO_FSB_SIZE (65536)
+#define ZERO_FSB_ORDER (get_order(ZERO_FSB_SIZE))
+extern struct page *zero_fs_block;
+
+/*
  * char_dev.c
  */
 extern void __init chrdev_init(void);
