@@ -193,7 +193,15 @@ unsigned long __thp_vma_allowable_orders(struct vm_area_struct *vma,
 	return orders;
 }
 
-static bool get_huge_zero_page(void)
+/*
+ * Do not increase the refcount
+ */
+struct folio *get_huge_zero_page_weak(void)
+{
+	return huge_zero_folio;
+}
+
+bool get_huge_zero_page(void)
 {
 	struct folio *zero_folio;
 retry:
@@ -220,8 +228,9 @@ retry:
 	count_vm_event(THP_ZERO_PAGE_ALLOC);
 	return true;
 }
+EXPORT_SYMBOL_GPL(get_huge_zero_page);
 
-static void put_huge_zero_page(void)
+void put_huge_zero_page(void)
 {
 	/*
 	 * Counter should never go to zero here. Only shrinker can put
@@ -229,6 +238,7 @@ static void put_huge_zero_page(void)
 	 */
 	BUG_ON(atomic_dec_and_test(&huge_zero_refcount));
 }
+EXPORT_SYMBOL_GPL(put_huge_zero_page);
 
 struct folio *mm_get_huge_zero_folio(struct mm_struct *mm)
 {

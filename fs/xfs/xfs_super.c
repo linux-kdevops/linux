@@ -1627,6 +1627,10 @@ xfs_fs_fill_super(
 		xfs_warn(mp,
 "EXPERIMENTAL: Filesystem with Large Block Size (%d bytes) enabled.",
 			mp->m_sb.sb_blocksize);
+		if (!get_huge_zero_page()) {
+			error = -ENOMEM;
+			goto out_free_sb;
+		}
 	}
 
 	/* Ensure this filesystem fits in the page cache limits */

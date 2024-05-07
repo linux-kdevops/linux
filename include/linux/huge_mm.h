@@ -404,6 +404,9 @@ static inline bool is_huge_zero_pud(pud_t pud)
 
 struct folio *mm_get_huge_zero_folio(struct mm_struct *mm);
 void mm_put_huge_zero_folio(struct mm_struct *mm);
+bool get_huge_zero_page(void);
+struct folio *get_huge_zero_page_weak(void);
+void put_huge_zero_page(void);
 
 #define mk_huge_pmd(page, prot) pmd_mkhuge(mk_pmd(page, prot))
 

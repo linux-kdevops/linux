@@ -236,10 +236,16 @@ static void iomap_dio_zero(const struct iomap_iter *iter, struct iomap_dio *dio,
 		loff_t pos, unsigned len)
 {
 	struct inode *inode = file_inode(dio->iocb->ki_filp);
-	struct page *page = ZERO_PAGE(0);
+	struct folio *folio = page_folio(ZERO_PAGE(0));
 	struct bio *bio;
 
 	WARN_ON_ONCE(len > (BIO_MAX_VECS * PAGE_SIZE));
+
+	/*
+	 * guaranteed to be available
+	 */
+	if (len > PAGE_SIZE)
+		folio = get_huge_zero_page_weak();
 
 	bio = iomap_dio_alloc_bio(iter, dio, BIO_MAX_VECS,
 				  REQ_OP_WRITE | REQ_SYNC | REQ_IDLE);
@@ -250,12 +256,7 @@ static void iomap_dio_zero(const struct iomap_iter *iter, struct iomap_dio *dio,
 	bio->bi_private = dio;
 	bio->bi_end_io = iomap_dio_bio_end_io;
 
-	while (len) {
-		unsigned int io_len = min_t(unsigned int, len, PAGE_SIZE);
-
-		__bio_add_page(bio, page, io_len, 0);
-		len -= io_len;
-	}
+	bio_add_folio_nofail(bio, folio, len, 0);
 	iomap_dio_submit_bio(iter, dio, bio, pos);
 }
 
