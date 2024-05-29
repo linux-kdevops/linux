@@ -27,6 +27,13 @@
 #define IOMAP_DIO_WRITE		(1U << 30)
 #define IOMAP_DIO_DIRTY		(1U << 31)
 
+/*
+ * Used for sub block zeroing in iomap_dio_zero()
+ */
+#define ZERO_FSB_SIZE (65536)
+#define ZERO_FSB_ORDER (get_order(ZERO_FSB_SIZE))
+static struct page *zero_fs_block;
+
 struct iomap_dio {
 	struct kiocb		*iocb;
 	const struct iomap_dio_ops *dops;
@@ -51,6 +58,16 @@ struct iomap_dio {
 		} aio;
 	};
 };
+
+int iomap_dio_init(void)
+{
+	zero_fs_block = alloc_pages(GFP_KERNEL | __GFP_ZERO, ZERO_FSB_ORDER);
+
+	if (!zero_fs_block)
+		return -ENOMEM;
+
+	return 0;
+}
 
 static struct bio *iomap_dio_alloc_bio(const struct iomap_iter *iter,
 		struct iomap_dio *dio, unsigned short nr_vecs, blk_opf_t opf)
@@ -236,17 +253,22 @@ static void iomap_dio_zero(const struct iomap_iter *iter, struct iomap_dio *dio,
 		loff_t pos, unsigned len)
 {
 	struct inode *inode = file_inode(dio->iocb->ki_filp);
-	struct page *page = ZERO_PAGE(0);
 	struct bio *bio;
+
+	/*
+	 * Max block size supported is 64k
+	 */
+	WARN_ON_ONCE(len > ZERO_FSB_SIZE);
 
 	bio = iomap_dio_alloc_bio(iter, dio, 1, REQ_OP_WRITE | REQ_SYNC | REQ_IDLE);
 	fscrypt_set_bio_crypt_ctx(bio, inode, pos >> inode->i_blkbits,
 				  GFP_KERNEL);
+
 	bio->bi_iter.bi_sector = iomap_sector(&iter->iomap, pos);
 	bio->bi_private = dio;
 	bio->bi_end_io = iomap_dio_bio_end_io;
 
-	__bio_add_page(bio, page, len, 0);
+	__bio_add_page(bio, zero_fs_block, len, 0);
 	iomap_dio_submit_bio(iter, dio, bio, pos);
 }
 
