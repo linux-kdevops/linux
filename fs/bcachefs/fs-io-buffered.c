@@ -322,7 +322,7 @@ int bch2_read_single_folio(struct folio *folio, struct address_space *mapping)
 
 	rbio->bio.bi_opf = REQ_OP_READ|REQ_SYNC;
 	rbio->bio.bi_iter.bi_sector = folio_sector(folio);
-	BUG_ON(!bio_add_folio(&rbio->bio, folio, folio_size(folio), 0));
+	bio_add_folio_nofail(&rbio->bio, folio, folio_size(folio), 0);
 
 	bch2_trans_run(c, (bchfs_read(trans, rbio, inode_inum(inode), NULL), 0));
 	wait_for_completion(&done);
