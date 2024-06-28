@@ -268,7 +268,7 @@ static int vfs_statx_path(struct path *path, int flags, struct kstat *stat,
 	 * obtained from the bdev backing inode.
 	 */
 	if (S_ISBLK(stat->mode))
-		bdev_statx(path, stat, request_mask);
+		bdev_statx(path, stat, request_mask | STATX_DIOALIGN);
 
 	return error;
 }
