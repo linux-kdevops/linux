@@ -1364,6 +1364,7 @@ void bdev_statx(struct path *path, struct kstat *stat,
 			queue_atomic_write_unit_max_bytes(bd_queue));
 	}
 
+	stat->blksize = (unsigned int) bdev_io_min(bdev);
 	blkdev_put_no_open(bdev);
 }
 
