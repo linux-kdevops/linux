@@ -3282,8 +3282,9 @@ int split_folio_to_list(struct folio *folio, struct list_head *list)
 	unsigned int min_order = 0;
 
 	if (!folio_test_anon(folio)) {
-		if (!folio->mapping && folio_test_pmd_mappable(folio)) {
-			count_vm_event(THP_SPLIT_PAGE_FAILED);
+		if (!folio->mapping) {
+		       if (folio_test_pmd_mappable(folio))
+				count_vm_event(THP_SPLIT_PAGE_FAILED);
 			return -EBUSY;
 		}
 		min_order = mapping_min_folio_order(folio->mapping);
