@@ -2032,6 +2032,8 @@ static bool nvme_update_disk_info(struct nvme_ns *ns, struct nvme_id_ns *id,
 	u32 bs = 1U << head->lba_shift;
 	u32 atomic_bs, phys_bs, io_opt = 0;
 	bool valid = true;
+	u32 awun = 0, awun_bs = 0;
+	u32 npwg = 0;
 
 	/*
 	 * The block layer can't support LBA sizes larger than the page size
@@ -2057,14 +2059,35 @@ static bool nvme_update_disk_info(struct nvme_ns *ns, struct nvme_id_ns *id,
 			atomic_bs = (1 + ns->ctrl->subsys->awupf) * bs;
 
 		nvme_update_atomic_write_disk_info(ns, id, lim, bs, atomic_bs);
+
+		if (id->nsfeat & NVME_NS_FEAT_ATOMICS && id->nawun)
+			awun = (1 + le16_to_cpu(id->nawun));
+		else
+			awun = (1 + ns->ctrl->subsys->awun);
+		/* Indicates MDTS can be used */
+		if (awun == 0xffff)
+			awun_bs = ns->ctrl->max_hw_sectors << SECTOR_SHIFT;
+		else
+			awun_bs = awun * bs;
+
 	}
 
 	if (id->nsfeat & NVME_NS_FEAT_IO_OPT) {
 		/* NPWG = Namespace Preferred Write Granularity */
-		phys_bs = bs * (1 + le16_to_cpu(id->npwg));
+		phys_bs = npwg = bs * (1 + le16_to_cpu(id->npwg));
 		/* NOWS = Namespace Optimal Write Size */
 		if (id->nows)
 			io_opt = bs * (1 + le16_to_cpu(id->nows));
+	}
+
+	if (awun) {
+		phys_bs = min(awun_bs, phys_bs);
+
+		/*
+		 * npwg and nows could be > awun, in such cases users should
+		 * be aware of out of order reads/writes as npwg and nows
+		 * are purely performance optimizations.
+		 */
 	}
 
 	/*
@@ -2074,7 +2097,7 @@ static bool nvme_update_disk_info(struct nvme_ns *ns, struct nvme_id_ns *id,
 	 */
 	lim->logical_block_size = bs;
 	lim->physical_block_size = min(phys_bs, atomic_bs);
-	lim->io_min = phys_bs;
+	lim->io_min = max(phys_bs, npwg);
 	lim->io_opt = io_opt;
 	if (ns->ctrl->quirks & NVME_QUIRK_DEALLOCATE_ZEROES)
 		lim->max_write_zeroes_sectors = UINT_MAX;
@@ -3021,6 +3044,7 @@ static int nvme_init_subsystem(struct nvme_ctrl *ctrl, struct nvme_id_ctrl *id)
 		kfree(subsys);
 		return -EINVAL;
 	}
+	subsys->awun = le16_to_cpu(id->awun);
 	subsys->awupf = le16_to_cpu(id->awupf);
 	nvme_mpath_default_iopolicy(subsys);
 
