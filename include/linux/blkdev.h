@@ -25,6 +25,7 @@
 #include <linux/uuid.h>
 #include <linux/xarray.h>
 #include <linux/file.h>
+#include <linux/pagemap.h>
 
 struct module;
 struct request_queue;
@@ -271,7 +272,9 @@ static inline dev_t disk_devt(struct gendisk *disk)
 /* blk_validate_limits() validates bsize, so drivers don't usually need to */
 static inline int blk_validate_block_size(unsigned long bsize)
 {
-	if (bsize < 512 || bsize > PAGE_SIZE || !is_power_of_2(bsize))
+	unsigned int bdev_size_limit = 1 << (PAGE_SHIFT + MAX_PAGECACHE_ORDER);
+
+	if (bsize < 512 || bsize > bdev_size_limit || !is_power_of_2(bsize))
 		return -EINVAL;
 
 	return 0;
