@@ -2371,7 +2371,7 @@ int block_read_full_folio(struct folio *folio, get_block_t *get_block)
 {
 	struct inode *inode = folio->mapping->host;
 	sector_t iblock, lblock;
-	struct buffer_head *bh, *head, *arr[MAX_BUF_PER_PAGE];
+	struct buffer_head *bh, *head, *restart_bh = NULL, *arr[MAX_BUF_PER_PAGE];
 	size_t blocksize;
 	int nr, i;
 	int fully_mapped = 1;
@@ -2388,6 +2388,7 @@ int block_read_full_folio(struct folio *folio, get_block_t *get_block)
 	iblock = div_u64(folio_pos(folio), blocksize);
 	lblock = div_u64(limit + blocksize - 1, blocksize);
 	bh = head;
+restart:
 	nr = 0;
 	i = 0;
 
@@ -2420,7 +2421,12 @@ int block_read_full_folio(struct folio *folio, get_block_t *get_block)
 				continue;
 		}
 		arr[nr++] = bh;
-	} while (i++, iblock++, (bh = bh->b_this_page) != head);
+	} while (i++, iblock++, (bh = bh->b_this_page) != head && nr < MAX_BUF_PER_PAGE);
+
+	if (nr == MAX_BUF_PER_PAGE && bh != head)
+		restart_bh = bh;
+	else
+		restart_bh = NULL;
 
 	if (fully_mapped)
 		folio_set_mappedtodisk(folio);
@@ -2452,6 +2458,15 @@ int block_read_full_folio(struct folio *folio, get_block_t *get_block)
 			end_buffer_async_read(bh, 1);
 		else
 			submit_bh(REQ_OP_READ, bh);
+	}
+
+	/*
+	 * Found more buffers than 'arr' could hold,
+	 * restart to submit the remaining ones.
+	 */
+	if (restart_bh) {
+		bh = restart_bh;
+		goto restart;
 	}
 	return 0;
 }
