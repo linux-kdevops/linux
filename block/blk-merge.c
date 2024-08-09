@@ -310,7 +310,7 @@ struct bio *bio_split_rw(struct bio *bio, const struct queue_limits *lim,
 
 		if (nsegs < lim->max_segments &&
 		    bytes + bv.bv_len <= max_bytes &&
-		    bv.bv_offset + bv.bv_len <= PAGE_SIZE) {
+		    bv.bv_offset + bv.bv_len <= lim->max_segment_size) {
 			nsegs++;
 			bytes += bv.bv_len;
 		} else {
