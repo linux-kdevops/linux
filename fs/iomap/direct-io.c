@@ -30,7 +30,7 @@
 /*
  * Used for sub block zeroing in iomap_dio_zero()
  */
-#define IOMAP_ZERO_PAGE_SIZE (SZ_64K)
+#define IOMAP_ZERO_PAGE_SIZE (SZ_2G)
 #define IOMAP_ZERO_PAGE_ORDER (get_order(IOMAP_ZERO_PAGE_SIZE))
 static struct page *zero_page;
 
