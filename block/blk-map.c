@@ -138,6 +138,9 @@ static int bio_copy_user_iov(struct request *rq, struct rq_map_data *map_data,
 	int nr_pages;
 	unsigned int len = iter->count;
 	unsigned int offset = map_data ? offset_in_page(map_data->offset) : 0;
+	struct request_queue *q = rq->q;
+	const struct queue_limits *lim = &q->limits;
+	unsigned bv_seg_lim = max(PAGE_SIZE, lim->max_segment_size);
 
 	bmd = bio_alloc_map_data(iter, gfp_mask);
 	if (!bmd)
@@ -151,7 +154,7 @@ static int bio_copy_user_iov(struct request *rq, struct rq_map_data *map_data,
 	bmd->is_our_pages = !map_data;
 	bmd->is_null_mapped = (map_data && map_data->null_mapped);
 
-	nr_pages = bio_max_segs(DIV_ROUND_UP(offset + len, PAGE_SIZE));
+	nr_pages = bio_max_segs(DIV_ROUND_UP(offset + len, bv_seg_lim));
 
 	ret = -ENOMEM;
 	bio = bio_kmalloc(nr_pages, gfp_mask);
@@ -161,7 +164,7 @@ static int bio_copy_user_iov(struct request *rq, struct rq_map_data *map_data,
 
 	if (map_data) {
 		nr_pages = 1U << map_data->page_order;
-		i = map_data->offset / PAGE_SIZE;
+		i = map_data->offset / bv_seg_lim;
 	}
 	while (len) {
 		unsigned int bytes = PAGE_SIZE;
@@ -569,6 +572,7 @@ static int blk_rq_map_user_bvec(struct request *rq, const struct iov_iter *iter)
 	unsigned int nsegs = 0, bytes = 0;
 	struct bio *bio;
 	size_t i;
+	unsigned bv_seg_lim = max(PAGE_SIZE, lim->max_segment_size);
 
 	if (!nr_iter || (nr_iter >> SECTOR_SHIFT) > queue_max_hw_sectors(q))
 		return -EINVAL;
@@ -601,7 +605,7 @@ static int blk_rq_map_user_bvec(struct request *rq, const struct iov_iter *iter)
 			goto put_bio;
 		if (bytes + bv->bv_len > nr_iter)
 			goto put_bio;
-		if (bv->bv_offset + bv->bv_len > PAGE_SIZE)
+		if (bv->bv_offset + bv->bv_len > bv_seg_lim)
 			goto put_bio;
 
 		nsegs++;
