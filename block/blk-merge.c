@@ -299,6 +299,7 @@ struct bio *bio_split_rw(struct bio *bio, const struct queue_limits *lim,
 	struct bio_vec bv, bvprv, *bvprvp = NULL;
 	struct bvec_iter iter;
 	unsigned nsegs = 0, bytes = 0;
+	unsigned bv_seg_lim = max(PAGE_SIZE, lim->max_segment_size);
 
 	bio_for_each_bvec(bv, bio, iter) {
 		/*
@@ -310,7 +311,7 @@ struct bio *bio_split_rw(struct bio *bio, const struct queue_limits *lim,
 
 		if (nsegs < lim->max_segments &&
 		    bytes + bv.bv_len <= max_bytes &&
-		    bv.bv_offset + bv.bv_len <= PAGE_SIZE) {
+		    bv.bv_offset + bv.bv_len <= bv_seg_lim) {
 			nsegs++;
 			bytes += bv.bv_len;
 		} else {
@@ -493,21 +494,9 @@ static unsigned blk_bvec_map_sg(struct request_queue *q,
 		unsigned offset = bvec->bv_offset + total;
 		unsigned len = get_max_segment_size(&q->limits,
 				bvec_phys(bvec) + total, nbytes);
-		struct page *page = bvec->bv_page;
-
-		/*
-		 * Unfortunately a fair number of drivers barf on scatterlists
-		 * that have an offset larger than PAGE_SIZE, despite other
-		 * subsystems dealing with that invariant just fine.  For now
-		 * stick to the legacy format where we never present those from
-		 * the block layer, but the code below should be removed once
-		 * these offenders (mostly MMC/SD drivers) are fixed.
-		 */
-		page += (offset >> PAGE_SHIFT);
-		offset &= ~PAGE_MASK;
 
 		*sg = blk_next_sg(sg, sglist);
-		sg_set_page(*sg, page, len, offset);
+		sg_set_page(*sg, bvec->bv_page, len, offset);
 
 		total += len;
 		nbytes -= len;
@@ -555,6 +544,8 @@ static int __blk_bios_map_sg(struct request_queue *q, struct bio *bio,
 	struct bvec_iter iter;
 	int nsegs = 0;
 	bool new_bio = false;
+	struct queue_limits *lim = &q->limits;
+	unsigned bv_seg_lim = max(PAGE_SIZE, lim->max_segment_size);
 
 	for_each_bio(bio) {
 		bio_for_each_bvec(bvec, bio, iter) {
@@ -567,7 +558,7 @@ static int __blk_bios_map_sg(struct request_queue *q, struct bio *bio,
 			    __blk_segment_map_sg_merge(q, &bvec, &bvprv, sg))
 				goto next_bvec;
 
-			if (bvec.bv_offset + bvec.bv_len <= PAGE_SIZE)
+			if (bvec.bv_offset + bvec.bv_len <= bv_seg_lim)
 				nsegs += __blk_bvec_map_sg(bvec, sglist, sg);
 			else
 				nsegs += blk_bvec_map_sg(q, &bvec, sglist, sg);
