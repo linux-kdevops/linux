@@ -799,7 +799,7 @@ static void blk_complete_request(struct request *req)
 	int total_bytes = blk_rq_bytes(req);
 	struct bio *bio = req->bio;
 
-	trace_block_rq_complete(req, BLK_STS_OK, total_bytes);
+	trace_block_rq_complete(req, BLK_STS_OK, total_bytes, blk_rq_algn(req));
 
 	if (!bio)
 		return;
@@ -870,7 +870,7 @@ bool blk_update_request(struct request *req, blk_status_t error,
 	bool quiet = req->rq_flags & RQF_QUIET;
 	int total_bytes;
 
-	trace_block_rq_complete(req, error, nr_bytes);
+	trace_block_rq_complete(req, error, nr_bytes, blk_rq_algn(req));
 
 	if (!req->bio)
 		return false;
@@ -891,7 +891,7 @@ bool blk_update_request(struct request *req, blk_status_t error,
 	if (unlikely(error && !blk_rq_is_passthrough(req) && !quiet) &&
 	    !test_bit(GD_DEAD, &req->q->disk->state)) {
 		blk_print_req_error(req, error);
-		trace_block_rq_error(req, error, nr_bytes);
+		trace_block_rq_error(req, error, nr_bytes, blk_rq_algn(req));
 	}
 
 	blk_account_io_completion(req, nr_bytes);
@@ -4839,6 +4839,35 @@ void blk_mq_update_nr_hw_queues(struct blk_mq_tag_set *set, int nr_hw_queues)
 	mutex_unlock(&set->tag_list_lock);
 }
 EXPORT_SYMBOL_GPL(blk_mq_update_nr_hw_queues);
+
+u32 blk_rq_algn(struct request *req)
+{
+	u32 lbs = req->q->limits.logical_block_size;
+	u32 max_algn_size = lbs, algn_size = lbs;
+	u32 lba_len = algn_size / lbs;
+	u32 len, lba, algn, lba_shift;
+	bool is_algn = false;
+	u32 max_loop = 12;
+	u8 i;
+
+	len = req->__data_len;
+	lba_shift = ilog2(lbs);
+	lba = req->__sector >> (lba_shift - SECTOR_SHIFT);
+
+	max_loop = 21 - lba_shift;
+	for (i = 0; i < max_loop; i++) {
+		is_algn = !(len % algn_size) && !(lba % lba_len);
+		if (is_algn) {
+			max_algn_size = algn_size;
+		}
+		algn_size = algn_size << 1;
+		lba_len = algn_size / lbs;
+	}
+	algn = max_algn_size;
+
+	return algn;
+}
+EXPORT_SYMBOL(blk_rq_algn);
 
 static int blk_hctx_poll(struct request_queue *q, struct blk_mq_hw_ctx *hctx,
 			 struct io_comp_batch *iob, unsigned int flags)

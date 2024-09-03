@@ -870,7 +870,8 @@ static void blk_add_trace_rq_requeue(void *ignore, struct request *rq)
 }
 
 static void blk_add_trace_rq_complete(void *ignore, struct request *rq,
-			blk_status_t error, unsigned int nr_bytes)
+				      blk_status_t error, unsigned int nr_bytes,
+				      unsigned int algn)
 {
 	blk_add_trace_rq(rq, error, nr_bytes, BLK_TA_COMPLETE,
 			 blk_trace_request_get_cgid(rq));

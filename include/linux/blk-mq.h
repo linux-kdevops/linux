@@ -1139,6 +1139,9 @@ static inline unsigned short blk_rq_nr_discard_segments(struct request *rq)
 	return max_t(unsigned short, rq->nr_phys_segments, 1);
 }
 
+/* The alignment of the block */
+u32 blk_rq_algn(struct request *req);
+
 int __blk_rq_map_sg(struct request_queue *q, struct request *rq,
 		struct scatterlist *sglist, struct scatterlist **last_sg);
 static inline int blk_rq_map_sg(struct request_queue *q, struct request *rq,

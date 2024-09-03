@@ -104,9 +104,9 @@ TRACE_EVENT(block_rq_requeue,
 
 DECLARE_EVENT_CLASS(block_rq_completion,
 
-	TP_PROTO(struct request *rq, blk_status_t error, unsigned int nr_bytes),
+	TP_PROTO(struct request *rq, blk_status_t error, unsigned int nr_bytes, unsigned int algn),
 
-	TP_ARGS(rq, error, nr_bytes),
+	TP_ARGS(rq, error, nr_bytes, algn),
 
 	TP_STRUCT__entry(
 		__field(  dev_t,	dev			)
@@ -115,6 +115,7 @@ DECLARE_EVENT_CLASS(block_rq_completion,
 		__field(  int	,	error			)
 		__array(  char,		rwbs,	RWBS_LEN	)
 		__dynamic_array( char,	cmd,	1		)
+		__field(  unsigned int,	algn			)
 	),
 
 	TP_fast_assign(
@@ -122,16 +123,17 @@ DECLARE_EVENT_CLASS(block_rq_completion,
 		__entry->sector    = blk_rq_pos(rq);
 		__entry->nr_sector = nr_bytes >> 9;
 		__entry->error     = blk_status_to_errno(error);
+		__entry->algn      = algn;
 
 		blk_fill_rwbs(__entry->rwbs, rq->cmd_flags);
 		__get_str(cmd)[0] = '\0';
 	),
 
-	TP_printk("%d,%d %s (%s) %llu + %u [%d]",
+	TP_printk("%d,%d %s (%s) %llu + %u [%d] algn: %d",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->rwbs, __get_str(cmd),
 		  (unsigned long long)__entry->sector,
-		  __entry->nr_sector, __entry->error)
+		  __entry->nr_sector, __entry->error, __entry->algn)
 );
 
 /**
@@ -148,9 +150,9 @@ DECLARE_EVENT_CLASS(block_rq_completion,
  */
 DEFINE_EVENT(block_rq_completion, block_rq_complete,
 
-	TP_PROTO(struct request *rq, blk_status_t error, unsigned int nr_bytes),
+	TP_PROTO(struct request *rq, blk_status_t error, unsigned int nr_bytes, unsigned int algn),
 
-	TP_ARGS(rq, error, nr_bytes)
+	TP_ARGS(rq, error, nr_bytes, algn)
 );
 
 /**
@@ -164,9 +166,9 @@ DEFINE_EVENT(block_rq_completion, block_rq_complete,
  */
 DEFINE_EVENT(block_rq_completion, block_rq_error,
 
-	TP_PROTO(struct request *rq, blk_status_t error, unsigned int nr_bytes),
+	TP_PROTO(struct request *rq, blk_status_t error, unsigned int nr_bytes, unsigned int algn),
 
-	TP_ARGS(rq, error, nr_bytes)
+	TP_ARGS(rq, error, nr_bytes, algn)
 );
 
 DECLARE_EVENT_CLASS(block_rq,
@@ -183,6 +185,7 @@ DECLARE_EVENT_CLASS(block_rq,
 		__array(  char,		rwbs,	RWBS_LEN	)
 		__array(  char,         comm,   TASK_COMM_LEN   )
 		__dynamic_array( char,	cmd,	1		)
+		__field(  unsigned int,	algn			)
 	),
 
 	TP_fast_assign(
@@ -190,17 +193,18 @@ DECLARE_EVENT_CLASS(block_rq,
 		__entry->sector    = blk_rq_trace_sector(rq);
 		__entry->nr_sector = blk_rq_trace_nr_sectors(rq);
 		__entry->bytes     = blk_rq_bytes(rq);
+		__entry->algn      = blk_rq_algn(rq);
 
 		blk_fill_rwbs(__entry->rwbs, rq->cmd_flags);
 		__get_str(cmd)[0] = '\0';
 		memcpy(__entry->comm, current->comm, TASK_COMM_LEN);
 	),
 
-	TP_printk("%d,%d %s %u (%s) %llu + %u [%s]",
+	TP_printk("%d,%d %s %u (%s) %llu + %u [%s] algn: %llu",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  __entry->rwbs, __entry->bytes, __get_str(cmd),
 		  (unsigned long long)__entry->sector,
-		  __entry->nr_sector, __entry->comm)
+		  __entry->nr_sector, __entry->comm, __entry->algn)
 );
 
 /**
