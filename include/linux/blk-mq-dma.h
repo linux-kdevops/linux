@@ -47,9 +47,6 @@ static inline bool blk_rq_dma_map_coalesce(struct dma_iova_state *state)
 static inline bool blk_rq_dma_unmap(struct request *req, struct device *dma_dev,
 		struct dma_iova_state *state)
 {
-	if (req->cmd_flags & REQ_P2PDMA)
-		return true;
-
 	if (dma_use_iova(state)) {
 		dma_iova_destroy(dma_dev, state, req->__data_len,
 				 rq_dma_dir(req), 0);
