@@ -2452,8 +2452,6 @@ int block_read_full_folio(struct folio *folio, get_block_t *get_block)
 	if (IS_ENABLED(CONFIG_FS_VERITY) && IS_VERITY(inode))
 		limit = inode->i_sb->s_maxbytes;
 
-	VM_BUG_ON_FOLIO(folio_test_large(folio), folio);
-
 	head = folio_create_buffers(folio, inode, 0);
 	iblock = div_u64(folio_pos(folio), head->b_size);
 	lblock = div_u64(limit + head->b_size - 1, head->b_size);
