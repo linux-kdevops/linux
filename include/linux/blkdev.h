@@ -269,8 +269,7 @@ static inline dev_t disk_devt(struct gendisk *disk)
 	return MKDEV(disk->major, disk->first_minor);
 }
 
-/* We should strive for 1 << (PAGE_SHIFT + MAX_PAGECACHE_ORDER) */
-#define BLK_MAX_BLOCK_SIZE      (SZ_64K)
+#define BLK_MAX_BLOCK_SIZE      (1 << (PAGE_SHIFT + MAX_PAGECACHE_ORDER))
 
 /* blk_validate_limits() validates bsize, so drivers don't usually need to */
 static inline int blk_validate_block_size(unsigned long bsize)
