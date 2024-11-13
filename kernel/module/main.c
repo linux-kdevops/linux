@@ -2989,7 +2989,7 @@ static noinline int do_init_module(struct module *mod)
 
 	mod_stat_inc(&modcount);
 
-	return 0;
+	return ret;
 
 fail_free_freeinit:
 	kfree(freeinit);
