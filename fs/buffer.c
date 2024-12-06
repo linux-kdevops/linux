@@ -2350,39 +2350,30 @@ bool block_is_partially_uptodate(struct folio *folio, size_t from, size_t count)
 }
 EXPORT_SYMBOL(block_is_partially_uptodate);
 
+#define MAX_BUF_CHUNK 8
+
 /*
- * Generic "read_folio" function for block devices that have the normal
- * get_block functionality. This is most of the block device filesystems.
- * Reads the folio asynchronously --- the unlock_buffer() and
- * set/clear_buffer_uptodate() functions propagate buffer state into the
- * folio once IO has completed.
+ * Reads up to MAX_BUF_CHUNK buffer heads at a time on a folio on the
+ * given block range iblock to lblock and helps update the number of buffers
+ * which were not uptodate or unmapped for which we issued an async read
+ * for under @nr for the full folio. Returns the last buffer head we worked on.
  */
-int block_read_full_folio(struct folio *folio, get_block_t *get_block)
+static struct buffer_head *block_read_folio_chunk(struct folio *folio,
+						  struct buffer_head *head,
+						  sector_t *iblock,
+						  sector_t lblock,
+						  get_block_t *get_block,
+						  bool *page_error,
+						  bool *fully_mapped,
+						  int *processed)
 {
 	struct inode *inode = folio->mapping->host;
-	sector_t iblock, lblock;
-	struct buffer_head *bh, *head, *arr[MAX_BUF_PER_PAGE];
-	size_t blocksize;
-	int nr, i;
-	int fully_mapped = 1;
-	bool page_error = false;
-	loff_t limit = i_size_read(inode);
+	struct buffer_head *arr[MAX_BUF_CHUNK];
+	struct buffer_head *bh = head, *last_bh = NULL;
+	int nr = 0, i = 0;
+	size_t blocksize = head->b_size;
 
-	/* This is needed for ext4. */
-	if (IS_ENABLED(CONFIG_FS_VERITY) && IS_VERITY(inode))
-		limit = inode->i_sb->s_maxbytes;
-
-	VM_BUG_ON_FOLIO(folio_test_large(folio), folio);
-
-	head = folio_create_buffers(folio, inode, 0);
-	blocksize = head->b_size;
-
-	iblock = div_u64(folio_pos(folio), blocksize);
-	lblock = div_u64(limit + blocksize - 1, blocksize);
-	bh = head;
-	nr = 0;
-	i = 0;
-
+	/* Stage 1: collect buffers not uptodate and not mapped yet */
 	do {
 		if (buffer_uptodate(bh))
 			continue;
@@ -2390,12 +2381,12 @@ int block_read_full_folio(struct folio *folio, get_block_t *get_block)
 		if (!buffer_mapped(bh)) {
 			int err = 0;
 
-			fully_mapped = 0;
-			if (iblock < lblock) {
+			*fully_mapped = false;
+			if (*iblock < lblock) {
 				WARN_ON(bh->b_size != blocksize);
-				err = get_block(inode, iblock, bh, 0);
+				err = get_block(inode, *iblock, bh, 0);
 				if (err)
-					page_error = true;
+					*page_error = true;
 			}
 			if (!buffer_mapped(bh)) {
 				folio_zero_range(folio, i * blocksize,
@@ -2412,19 +2403,11 @@ int block_read_full_folio(struct folio *folio, get_block_t *get_block)
 				continue;
 		}
 		arr[nr++] = bh;
-	} while (i++, iblock++, (bh = bh->b_this_page) != head);
+	} while (i++, *iblock++, (bh = bh->b_this_page) != head &&
+		 nr < MAX_BUF_CHUNK);
 
-	if (fully_mapped)
-		folio_set_mappedtodisk(folio);
-
-	if (!nr) {
-		/*
-		 * All buffers are uptodate or get_block() returned an
-		 * error when trying to map them - we can finish the read.
-		 */
-		folio_end_read(folio, !page_error);
-		return 0;
-	}
+	*processed = nr;
+	last_bh = bh;
 
 	/* Stage two: lock the buffers */
 	for (i = 0; i < nr; i++) {
@@ -2445,6 +2428,53 @@ int block_read_full_folio(struct folio *folio, get_block_t *get_block)
 		else
 			submit_bh(REQ_OP_READ, bh);
 	}
+
+	return last_bh;
+}
+
+/*
+ * Generic "read_folio" function for block devices that have the normal
+ * get_block functionality. This is most of the block device filesystems.
+ * Reads the folio asynchronously --- the unlock_buffer() and
+ * set/clear_buffer_uptodate() functions propagate buffer state into the
+ * folio once IO has completed.
+ */
+int block_read_full_folio(struct folio *folio, get_block_t *get_block)
+{
+	struct inode *inode = folio->mapping->host;
+	struct buffer_head *head, *bh;
+	sector_t iblock, lblock;
+	bool page_error = false;
+	bool fully_mapped = true;
+	int nr;
+	loff_t limit = i_size_read(inode);
+
+	if (IS_ENABLED(CONFIG_FS_VERITY) && IS_VERITY(inode))
+		limit = inode->i_sb->s_maxbytes;
+
+	VM_BUG_ON_FOLIO(folio_test_large(folio), folio);
+
+	head = folio_create_buffers(folio, inode, 0);
+	iblock = div_u64(folio_pos(folio), head->b_size);
+	lblock = div_u64(limit + head->b_size - 1, head->b_size);
+
+	do {
+		bh = block_read_folio_chunk(folio, head, &iblock, lblock,
+					    get_block, &page_error,
+					    &fully_mapped, &nr);
+	} while (iblock < lblock && (bh = bh->b_this_page) != head);
+
+	if (fully_mapped)
+		folio_set_mappedtodisk(folio);
+	if (!nr) {
+		/*
+		 * All buffers are uptodate or get_block() returned an
+		 * error when trying to map them - we can finish the read.
+		 */
+		folio_end_read(folio, !page_error);
+		return 0;
+	}
+
 	return 0;
 }
 EXPORT_SYMBOL(block_read_full_folio);
