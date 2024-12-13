@@ -2415,7 +2415,10 @@ static void bh_read_batch_async(struct folio *folio,
          (__tmp);					\
          (__tmp) = bh_next(__tmp, __head))
 
+#define MAX_BUF_CHUNK 8
+
 struct bh_iter {
+	int chunk_number;
 	sector_t iblock;
 	get_block_t *get_block;
 	bool any_get_block_error;
@@ -2424,7 +2427,7 @@ struct bh_iter {
 };
 
 /*
- * Reads up to MAX_BUF_PER_PAGE buffer heads at a time on a folio on the given
+ * Reads up to MAX_BUF_CHUNK buffer heads at a time on a folio on the given
  * block range iblock to lblock and helps update the number of buffer-heads
  * which were not uptodate or unmapped for which we issued an async read for
  * on iter->bh_folio_reads for the full folio. Returns the last buffer-head we
@@ -2436,10 +2439,11 @@ static struct buffer_head *bh_read_iter(struct folio *folio,
 					struct inode *inode,
 					struct bh_iter *iter, sector_t lblock)
 {
-	struct buffer_head *arr[MAX_BUF_PER_PAGE];
+	struct buffer_head *arr[MAX_BUF_CHUNK];
 	struct buffer_head *bh = pivot, *last;
 	int nr = 0, i = 0;
 	size_t blocksize = head->b_size;
+	int chunk_idx = MAX_BUF_CHUNK * iter->chunk_number;
 	bool no_reads = false;
 	bool fully_mapped = false;
 
@@ -2447,7 +2451,8 @@ static struct buffer_head *bh_read_iter(struct folio *folio,
 
 	/* collect buffers not uptodate and not mapped yet */
 	for_each_bh_pivot(bh, last, head) {
-		BUG_ON(nr >= MAX_BUF_PER_PAGE);
+		if (nr >= MAX_BUF_CHUNK)
+			break;
 
 		if (buffer_uptodate(bh)) {
 			iter->iblock++;
@@ -2487,8 +2492,7 @@ static struct buffer_head *bh_read_iter(struct folio *folio,
 	}
 
 	iter->bh_folio_reads += nr;
-
-	WARN_ON_ONCE(!bh_is_last(last, head));
+	iter->chunk_number++;
 
 	if (bh_is_last(last, head)) {
 		if (!iter->bh_folio_reads)
@@ -2518,6 +2522,7 @@ int block_read_full_folio(struct folio *folio, get_block_t *get_block)
 	struct buffer_head *bh, *head;
 	struct bh_iter iter = {
 		.get_block = get_block,
+		.chunk_number = 0,
 		.unmapped = 0,
 		.any_get_block_error = false,
 		.bh_folio_reads = 0,
