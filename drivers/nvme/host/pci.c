@@ -63,6 +63,23 @@ MODULE_PARM_DESC(sgl_threshold,
 		"Use SGLs when average request segment size is larger or equal to "
 		"this size. Use 0 to disable SGLs.");
 
+/* Max transfer: 8192 KiB
+ * Available PRP lists: 5
+ * Max segments per page: 128 -> 512 KiB
+ * Nr of segments needed for 8192 KiB: 2048
+ * Nr of pages needed for 8192 KiB transfer: 16
+ *
+ * 128  - 1 Page  -  512 KiB
+ * 256  - 2 Pages  - 1 MiB
+ * 512  - 4 Pages  - 2 MiB
+ * 1024 - 8 Pages  - 4 MiB
+ * 2048 - 16 Pages - 8 MiB
+ */
+static unsigned int max_segments = NVME_MAX_SEGS;
+module_param(max_segments, uint, 0644);
+MODULE_PARM_DESC(max_segments,
+	"Maximum Number of Segments");
+
 #define NVME_PCI_MIN_QUEUE_SIZE 2
 #define NVME_PCI_MAX_QUEUE_SIZE 4095
 static int io_queue_depth_set(const char *val, const struct kernel_param *kp);
@@ -2855,7 +2872,11 @@ static void nvme_release_prp_pools(struct nvme_dev *dev)
 static int nvme_pci_alloc_iod_mempool(struct nvme_dev *dev)
 {
 	size_t meta_size = sizeof(struct scatterlist) * (NVME_MAX_META_SEGS + 1);
-	size_t alloc_size = sizeof(struct scatterlist) * NVME_MAX_SEGS;
+	size_t alloc_size = sizeof(struct scatterlist) * max_segments;
+
+	if (max_segments > 128)
+		pr_info("Large sg allocation pool to support %d segments\n",
+			max_segments);
 
 	dev->iod_mempool = mempool_create_node(1,
 			mempool_kmalloc, mempool_kfree,
@@ -3212,7 +3233,8 @@ static struct nvme_dev *nvme_pci_alloc_dev(struct pci_dev *pdev,
 	 */
 	dev->ctrl.max_hw_sectors = min_t(u32,
 		NVME_MAX_KB_SZ << 1, dma_opt_mapping_size(&pdev->dev) >> 9);
-	dev->ctrl.max_segments = NVME_MAX_SEGS;
+	dev->ctrl.max_segments = max_segments =
+		round_up(max(min(2048, max_segments), 128), 128);
 	dev->ctrl.max_integrity_segments = 1;
 	return dev;
 
@@ -3782,8 +3804,6 @@ static int __init nvme_init(void)
 	BUILD_BUG_ON(sizeof(struct nvme_create_sq) != 64);
 	BUILD_BUG_ON(sizeof(struct nvme_delete_queue) != 64);
 	BUILD_BUG_ON(IRQ_AFFINITY_MAX_SETS < 2);
-	BUILD_BUG_ON(NVME_MAX_SEGS > SGES_PER_PAGE);
-	BUILD_BUG_ON(sizeof(struct scatterlist) * NVME_MAX_SEGS > PAGE_SIZE);
 	BUILD_BUG_ON(nvme_pci_npages_prp() > NVME_MAX_NR_ALLOCATIONS);
 
 	return pci_register_driver(&nvme_driver);
