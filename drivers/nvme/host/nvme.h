@@ -319,7 +319,6 @@ struct nvme_ctrl {
 
 	u64 cap;
 	u32 max_hw_sectors;
-	u32 max_segments;
 	u32 max_integrity_segments;
 	u32 max_zeroes_sectors;
 #ifdef CONFIG_BLK_DEV_ZONED

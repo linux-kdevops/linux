@@ -2014,17 +2014,16 @@ static void nvme_update_atomic_write_disk_info(struct nvme_ns *ns,
 	lim->features |= BLK_FEAT_ATOMIC_WRITES;
 }
 
-static u32 nvme_max_drv_segments(struct nvme_ctrl *ctrl)
+static u32 nvme_max_segments(struct nvme_ctrl *ctrl)
 {
-	return ctrl->max_hw_sectors / (NVME_CTRL_PAGE_SIZE >> SECTOR_SHIFT) + 1;
+	return ctrl->max_hw_sectors / (PAGE_SIZE >> SECTOR_SHIFT) + 1;
 }
 
 static void nvme_set_ctrl_limits(struct nvme_ctrl *ctrl,
 		struct queue_limits *lim)
 {
 	lim->max_hw_sectors = ctrl->max_hw_sectors;
-	lim->max_segments = min_t(u32, USHRT_MAX,
-		min_not_zero(nvme_max_drv_segments(ctrl), ctrl->max_segments));
+	lim->max_segments = min_t(u32, USHRT_MAX, nvme_max_segments(ctrl));
 	lim->max_integrity_segments = ctrl->max_integrity_segments;
 	lim->virt_boundary_mask = NVME_CTRL_PAGE_SIZE - 1;
 	lim->max_segment_size = UINT_MAX;
