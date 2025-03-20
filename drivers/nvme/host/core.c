@@ -2070,6 +2070,8 @@ static bool nvme_update_disk_info(struct nvme_ns *ns, struct nvme_id_ns *id,
 		/* NOWS = Namespace Optimal Write Size */
 		if (id->nows)
 			io_opt = bs * (1 + le16_to_cpu(id->nows));
+		else if (ns->ctrl->quirks & NVME_QUIRK_BOGUS_NOWS)
+			io_opt = lim->max_hw_sectors << SECTOR_SHIFT;
 	}
 
 	/*

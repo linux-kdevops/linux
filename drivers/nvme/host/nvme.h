@@ -178,6 +178,11 @@ enum nvme_quirks {
 	 * Align dma pool segment size to 512 bytes
 	 */
 	NVME_QUIRK_DMAPOOL_ALIGN_512		= (1 << 22),
+
+	/*
+	 * Reports a NOWS of 0 which is 1 logical block size which is bogus
+	 */
+	NVME_QUIRK_BOGUS_NOWS			= (1 << 23),
 };
 
 /*
