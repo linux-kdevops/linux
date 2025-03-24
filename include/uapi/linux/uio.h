@@ -43,7 +43,7 @@ struct dmabuf_token {
  */
  
 #define UIO_FASTIOV	8
-#define UIO_MAXIOV	1024
+#define UIO_MAXIOV	2048
 
 
 #endif /* _UAPI__LINUX_UIO_H */
