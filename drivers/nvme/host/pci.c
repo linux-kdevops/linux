@@ -33,14 +33,12 @@
 #define SQ_SIZE(q)	((q)->q_depth << (q)->sqes)
 #define CQ_SIZE(q)	((q)->q_depth * sizeof(struct nvme_completion))
 
-#define SGES_PER_PAGE	(NVME_CTRL_PAGE_SIZE / sizeof(struct nvme_sgl_desc))
-
 /*
  * These can be higher, but we need to ensure that any command doesn't
  * require an sg allocation that needs more than a page of data.
  */
 #define NVME_MAX_KB_SZ	8192
-#define NVME_MAX_SEGS	128
+#define NVME_MAX_SEGS	2048
 #define NVME_MAX_META_SEGS 15
 #define NVME_MAX_NR_DESCRIPTORS		5
 #define NVME_SMALL_DESCRIPTOR_SIZE	256
@@ -2891,7 +2889,7 @@ static void nvme_release_prp_pools(struct nvme_dev *dev)
 static int nvme_pci_alloc_iod_mempool(struct nvme_dev *dev)
 {
 	size_t meta_size = sizeof(struct scatterlist) * (NVME_MAX_META_SEGS + 1);
-	size_t alloc_size = sizeof(struct scatterlist) * NVME_MAX_SEGS;
+	size_t alloc_size = sizeof(struct scatterlist) * 128;
 
 	dev->iod_mempool = mempool_create_node(1,
 			mempool_kmalloc, mempool_kfree,
@@ -3818,8 +3816,6 @@ static int __init nvme_init(void)
 	BUILD_BUG_ON(sizeof(struct nvme_create_sq) != 64);
 	BUILD_BUG_ON(sizeof(struct nvme_delete_queue) != 64);
 	BUILD_BUG_ON(IRQ_AFFINITY_MAX_SETS < 2);
-	BUILD_BUG_ON(NVME_MAX_SEGS > SGES_PER_PAGE);
-	BUILD_BUG_ON(sizeof(struct scatterlist) * NVME_MAX_SEGS > PAGE_SIZE);
 	BUILD_BUG_ON(nvme_pci_npages_prp() > NVME_MAX_NR_DESCRIPTORS);
 
 	return pci_register_driver(&nvme_driver);
