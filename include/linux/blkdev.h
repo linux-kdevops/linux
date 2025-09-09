@@ -270,15 +270,15 @@ static inline dev_t disk_devt(struct gendisk *disk)
 	return MKDEV(disk->major, disk->first_minor);
 }
 
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+//#ifdef CONFIG_TRANSPARENT_HUGEPAGE
 /*
  * We should strive for 1 << (PAGE_SHIFT + MAX_PAGECACHE_ORDER)
  * however we constrain this to what we can validate and test.
  */
 #define BLK_MAX_BLOCK_SIZE      SZ_64K
-#else
-#define BLK_MAX_BLOCK_SIZE      PAGE_SIZE
-#endif
+//#else
+//#define BLK_MAX_BLOCK_SIZE      PAGE_SIZE
+//#endif
 
 
 /* blk_validate_limits() validates bsize, so drivers don't usually need to */
