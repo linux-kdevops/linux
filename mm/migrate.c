@@ -1563,12 +1563,16 @@ static inline int try_split_folio(struct folio *folio, struct list_head *split_f
 {
 	int rc;
 
+	if (!can_split_folio(folio, 0, NULL))
+		return -EINVAL;
+
 	if (mode == MIGRATE_ASYNC) {
 		if (!folio_trylock(folio))
 			return -EAGAIN;
 	} else {
 		folio_lock(folio);
 	}
+
 	rc = split_folio_to_list(folio, split_folios);
 	folio_unlock(folio);
 	if (!rc)
