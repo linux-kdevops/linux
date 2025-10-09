@@ -138,8 +138,10 @@ static void page_cache_delete(struct address_space *mapping,
 
 	VM_BUG_ON_FOLIO(!folio_test_locked(folio), folio);
 
+	write_seqcount_begin(&mapping->i_pages_delete_seqcnt);
 	xas_store(&xas, shadow);
 	xas_init_marks(&xas);
+	write_seqcount_end(&mapping->i_pages_delete_seqcnt);
 
 	folio->mapping = NULL;
 	/* Leave folio->index set: truncation lookup relies upon it */
@@ -2659,41 +2661,106 @@ static void filemap_end_dropbehind_read(struct folio *folio)
 	}
 }
 
-/**
- * filemap_read - Read data from the page cache.
- * @iocb: The iocb to read.
- * @iter: Destination for the data.
- * @already_read: Number of bytes already read by the caller.
- *
- * Copies data from the page cache.  If the data is not currently present,
- * uses the readahead and read_folio address_space operations to fetch it.
- *
- * Return: Total number of bytes copied, including those already read by
- * the caller.  If an error happens before any bytes are copied, returns
- * a negative error number.
- */
-ssize_t filemap_read(struct kiocb *iocb, struct iov_iter *iter,
-		ssize_t already_read)
+static bool filemap_read_fast(struct kiocb *iocb, struct iov_iter *iter,
+			      char *buffer, size_t buffer_size,
+			      ssize_t *already_read)
+{
+	struct address_space *mapping = iocb->ki_filp->f_mapping;
+	struct file_ra_state *ra = &iocb->ki_filp->f_ra;
+	loff_t last_pos = ra->prev_pos;
+	struct folio *folio;
+	loff_t file_size;
+	unsigned int seq;
+
+	/* Don't bother with flush_dcache_folio() */
+	if (ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE)
+		return false;
+
+	if (!iter_is_ubuf(iter))
+		return false;
+
+	/* Give up and go to slow path if raced with page_cache_delete() */
+	if (!raw_seqcount_try_begin(&mapping->i_pages_delete_seqcnt, seq))
+		return false;
+
+	if (!user_access_begin(iter->ubuf + iter->iov_offset, iter->count))
+		return false;
+
+	rcu_read_lock();
+	pagefault_disable();
+
+	do {
+		size_t to_read, read;
+		XA_STATE(xas, &mapping->i_pages, iocb->ki_pos >> PAGE_SHIFT);
+
+		xas_reset(&xas);
+		folio = xas_load(&xas);
+		if (xas_retry(&xas, folio))
+			break;
+
+		if (!folio || xa_is_value(folio))
+			break;
+
+		if (!folio_test_uptodate(folio))
+			break;
+
+		/* No fast-case if readahead is supposed to started */
+		if (folio_test_readahead(folio))
+			break;
+		/* .. or mark it accessed */
+		if (!folio_test_referenced(folio))
+			break;
+
+		/* i_size check must be after folio_test_uptodate() */
+		file_size = i_size_read(mapping->host);
+
+		do {
+			if (unlikely(iocb->ki_pos >= file_size))
+				goto out;
+
+			to_read = min(iov_iter_count(iter), buffer_size);
+			if (to_read > file_size - iocb->ki_pos)
+				to_read = file_size - iocb->ki_pos;
+
+			read = memcpy_from_file_folio(buffer, folio, iocb->ki_pos, to_read);
+
+			/* Give up and go to slow path if raced with page_cache_delete() */
+			if (read_seqcount_retry(&mapping->i_pages_delete_seqcnt, seq))
+				goto out;
+
+			unsafe_copy_to_user(iter->ubuf + iter->iov_offset, buffer,
+					    read, out);
+
+			iter->iov_offset += read;
+			iter->count -= read;
+			*already_read += read;
+			iocb->ki_pos += read;
+			last_pos = iocb->ki_pos;
+		} while (iov_iter_count(iter) && iocb->ki_pos % folio_size(folio));
+	} while (iov_iter_count(iter));
+out:
+	pagefault_enable();
+	rcu_read_unlock();
+	user_access_end();
+
+	file_accessed(iocb->ki_filp);
+	ra->prev_pos = last_pos;
+	return !iov_iter_count(iter);
+}
+
+static ssize_t filemap_read_slow(struct kiocb *iocb, struct iov_iter *iter,
+			      struct folio_batch *fbatch, ssize_t already_read)
 {
 	struct file *filp = iocb->ki_filp;
 	struct file_ra_state *ra = &filp->f_ra;
 	struct address_space *mapping = filp->f_mapping;
 	struct inode *inode = mapping->host;
-	struct folio_batch fbatch;
 	int i, error = 0;
 	bool writably_mapped;
 	loff_t isize, end_offset;
 	loff_t last_pos = ra->prev_pos;
 
-	if (unlikely(iocb->ki_pos < 0))
-		return -EINVAL;
-	if (unlikely(iocb->ki_pos >= inode->i_sb->s_maxbytes))
-		return 0;
-	if (unlikely(!iov_iter_count(iter)))
-		return 0;
-
-	iov_iter_truncate(iter, inode->i_sb->s_maxbytes - iocb->ki_pos);
-	folio_batch_init(&fbatch);
+	folio_batch_init(fbatch);
 
 	do {
 		cond_resched();
@@ -2709,7 +2776,7 @@ ssize_t filemap_read(struct kiocb *iocb, struct iov_iter *iter,
 		if (unlikely(iocb->ki_pos >= i_size_read(inode)))
 			break;
 
-		error = filemap_get_pages(iocb, iter->count, &fbatch, false);
+		error = filemap_get_pages(iocb, iter->count, fbatch, false);
 		if (error < 0)
 			break;
 
@@ -2737,11 +2804,11 @@ ssize_t filemap_read(struct kiocb *iocb, struct iov_iter *iter,
 		 * mark it as accessed the first time.
 		 */
 		if (!pos_same_folio(iocb->ki_pos, last_pos - 1,
-				    fbatch.folios[0]))
-			folio_mark_accessed(fbatch.folios[0]);
+				    fbatch->folios[0]))
+			folio_mark_accessed(fbatch->folios[0]);
 
-		for (i = 0; i < folio_batch_count(&fbatch); i++) {
-			struct folio *folio = fbatch.folios[i];
+		for (i = 0; i < folio_batch_count(fbatch); i++) {
+			struct folio *folio = fbatch->folios[i];
 			size_t fsize = folio_size(folio);
 			size_t offset = iocb->ki_pos & (fsize - 1);
 			size_t bytes = min_t(loff_t, end_offset - iocb->ki_pos,
@@ -2772,18 +2839,56 @@ ssize_t filemap_read(struct kiocb *iocb, struct iov_iter *iter,
 			}
 		}
 put_folios:
-		for (i = 0; i < folio_batch_count(&fbatch); i++) {
-			struct folio *folio = fbatch.folios[i];
+		for (i = 0; i < folio_batch_count(fbatch); i++) {
+			struct folio *folio = fbatch->folios[i];
 
 			filemap_end_dropbehind_read(folio);
 			folio_put(folio);
 		}
-		folio_batch_init(&fbatch);
+		folio_batch_init(fbatch);
 	} while (iov_iter_count(iter) && iocb->ki_pos < isize && !error);
 
 	file_accessed(filp);
 	ra->prev_pos = last_pos;
 	return already_read ? already_read : error;
+}
+
+/**
+ * filemap_read - Read data from the page cache.
+ * @iocb: The iocb to read.
+ * @iter: Destination for the data.
+ * @already_read: Number of bytes already read by the caller.
+ *
+ * Copies data from the page cache.  If the data is not currently present,
+ * uses the readahead and read_folio address_space operations to fetch it.
+ *
+ * Return: Total number of bytes copied, including those already read by
+ * the caller.  If an error happens before any bytes are copied, returns
+ * a negative error number.
+ */
+ssize_t filemap_read(struct kiocb *iocb, struct iov_iter *iter,
+		ssize_t already_read)
+{
+	struct inode *inode = iocb->ki_filp->f_mapping->host;
+	union {
+		struct folio_batch fbatch;
+		__DECLARE_FLEX_ARRAY(char, buffer);
+		//char __buffer[4096];
+	} area __uninitialized;
+
+	if (unlikely(iocb->ki_pos < 0))
+		return -EINVAL;
+	if (unlikely(iocb->ki_pos >= inode->i_sb->s_maxbytes))
+		return 0;
+	if (unlikely(!iov_iter_count(iter)))
+		return 0;
+
+	iov_iter_truncate(iter, inode->i_sb->s_maxbytes - iocb->ki_pos);
+
+	if (filemap_read_fast(iocb, iter, area.buffer, sizeof(area), &already_read))
+		return already_read;
+
+	return filemap_read_slow(iocb, iter, &area.fbatch, already_read);
 }
 EXPORT_SYMBOL_GPL(filemap_read);
 
