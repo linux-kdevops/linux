@@ -1466,11 +1466,64 @@ xfs_falloc_allocate_range(
 	return xfs_falloc_setsize(file, new_size);
 }
 
+static int
+xfs_falloc_write_zeroes(
+	struct file		*file,
+	int			mode,
+	loff_t			offset,
+	loff_t			len,
+	struct xfs_zone_alloc_ctx *ac)
+{
+	struct inode		*inode = file_inode(file);
+	struct xfs_inode	*ip = XFS_I(inode);
+	unsigned int		blksize = i_blocksize(inode);
+	loff_t			new_size = 0;
+	int			error;
+
+	if (!bdev_write_zeroes_unmap_sectors(
+		    xfs_inode_buftarg(XFS_I(inode))->bt_bdev))
+		return -EOPNOTSUPP;
+
+	error = xfs_falloc_newsize(file, mode, offset, len, &new_size);
+	if (error)
+		return error;
+
+	error = xfs_free_file_space(ip, offset, len, ac);
+	if (error)
+		return error;
+
+	len = round_up(offset + len, blksize) - round_down(offset, blksize);
+	offset = round_down(offset, blksize);
+
+	/*
+	 * Allocate unwritten extents first. This ensures that xfs_falloc_setsize
+	 * does not trip over a written extent beyond i_size and trigger warnings
+	 * in iomap_zero_range.
+	 */
+	error = xfs_alloc_file_space(ip, offset, len, XFS_BMAPI_PREALLOC);
+	if (error)
+		return error;
+
+	error = xfs_falloc_setsize(file, new_size);
+	if (error)
+		return error;
+
+	/*
+	 * Now convert the unwritten extents to written and zero them out using
+	 * unmap write zeroes.
+	 */
+	error = xfs_alloc_file_space(ip, offset, len, XFS_BMAPI_CONVERT | XFS_BMAPI_ZERO);
+	if (error)
+		return error;
+
+	return 0;
+}
+
 #define	XFS_FALLOC_FL_SUPPORTED						\
 		(FALLOC_FL_ALLOCATE_RANGE | FALLOC_FL_KEEP_SIZE |	\
 		 FALLOC_FL_PUNCH_HOLE |	FALLOC_FL_COLLAPSE_RANGE |	\
 		 FALLOC_FL_ZERO_RANGE |	FALLOC_FL_INSERT_RANGE |	\
-		 FALLOC_FL_UNSHARE_RANGE)
+		 FALLOC_FL_UNSHARE_RANGE | FALLOC_FL_WRITE_ZEROES)
 
 STATIC long
 __xfs_file_fallocate(
@@ -1521,6 +1574,9 @@ __xfs_file_fallocate(
 		break;
 	case FALLOC_FL_ALLOCATE_RANGE:
 		error = xfs_falloc_allocate_range(file, mode, offset, len);
+		break;
+	case FALLOC_FL_WRITE_ZEROES:
+		error = xfs_falloc_write_zeroes(file, mode, offset, len, ac);
 		break;
 	default:
 		error = -EOPNOTSUPP;
